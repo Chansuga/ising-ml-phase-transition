@@ -103,18 +103,18 @@ def _metropolis_sweep(state, beta, J, h):
             state[y, x] *= -1
 
 
-def run_mcmc(N, init_state, beta, n_step, J=1, h=0.0):
-    """IsingMC.run_mcmc と同じく, 各ステップの配位を記録した配列を返す.
+def run_mcmc(init_state, beta, n_step, J=1, h=0.0):
+    """IsingMC.run_mcmc の state_dynamics[n_step] にあたる, 最後の配位のコピー (float64) を返す.
 
     元コードと同様に init_state をその場で書き換える (呼び出し側の配列も変化する).
+    元コードは全ステップの配位を記録した配列 (n_step+1, N, N) を作り, その 1 枚をビューとして返していた.
+    ビューを保持し続けると配列全体がメモリに残るため (kashiwa で約 40 GB), 最後の配位だけをコピーして返す.
+    返す配列が次の呼び出しでその場で書き換えられる点は元コードと同じなので, 生成されるデータは変わらない.
     """
     state = init_state
-    state_dynamics = np.zeros((n_step + 1, N, N))
-    state_dynamics[0] = state
-    for step in range(n_step):
+    for _ in range(n_step):
         _metropolis_sweep(state, beta, J, h)
-        state_dynamics[step + 1] = state
-    return state_dynamics
+    return state.astype(np.float64)
 
 
 @njit(cache=True)
@@ -140,10 +140,10 @@ def generate_tanaka(lattice_sizes, seed):
         for i in tqdm(range(num_label), desc=f"tanaka L={N}"):
             beta = 0.2 + (i / (num_label - 1)) * 0.8
             init_state = np.full((N, N), -1)
-            Ising_state = run_mcmc(N, init_state, beta, n_step_first)[n_step_first]
+            Ising_state = run_mcmc(init_state, beta, n_step_first)
             for _ in range(number):
                 init_state = Ising_state
-                Ising_state = run_mcmc(N, init_state, beta, n_step_second)[n_step_second]
+                Ising_state = run_mcmc(init_state, beta, n_step_second)
                 if Ising_state.sum() > 0:
                     Ising_state *= -1
                 spin_data.append(Ising_state)
@@ -161,11 +161,11 @@ def generate_kashiwa(seed, N=16):
     for i in tqdm(range(num_label), desc=f"kashiwa L={N}"):
         beta = 0.05 + (i / (num_label - 1)) * 0.95
         init_state = np.full((N, N), -1)
-        Ising_state = run_mcmc(N, init_state, beta, n_step_first)[n_step_first]
+        Ising_state = run_mcmc(init_state, beta, n_step_first)
         for _ in range(number):
             # IsingMC.flip: 1/2 の確率で配位全体の符号を反転
             init_state = -1 * Ising_state if np.random.choice([True, False]) else Ising_state
-            Ising_state = run_mcmc(N, init_state, beta, n_step_second)[n_step_second]
+            Ising_state = run_mcmc(init_state, beta, n_step_second)
             spin_data.append(Ising_state)
             label_data.append(beta)
     # temp_measure.ipynb などは _v3 の付いたファイル名で読み込む
