@@ -59,7 +59,7 @@ docker compose up --build
 python scripts/generate_data.py all
 ```
 
-実験ごとに生成することもできます（`carrasquilla` / `tanaka` / `kashiwa`）。所要時間の目安は[再現手順](docs/reproduce.md)を見てください。
+実験ごとに生成することもできます（`carrasquilla` / `tanaka` / `kashiwa`）。
 
 ### 3. ノートブックの実行
 
@@ -91,7 +91,7 @@ VS Code などでノートブックを開くだけなら、`uv sync --no-group l
 │       ├── data/                   #   学習済みモデル (*.pth)・生成したデータ
 │       └── image/                  #   実験で出力した図
 ├── scripts/generate_data.py        # スピン配位データの生成（Numba で高速化）
-├── docs/                           # 研究概要・再現手順・参考文献
+├── docs/                           # 研究概要・参考文献
 ├── Dockerfile
 ├── docker-compose.yml
 ├── pyproject.toml / uv.lock        # 依存ライブラリ（uv で管理）
