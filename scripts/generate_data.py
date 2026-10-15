@@ -13,7 +13,7 @@
     python scripts/generate_data.py kashiwa
 
 パラメータを変える例 (設定できる項目は `python scripts/generate_data.py tanaka -h` などで確認):
-    python scripts/generate_data.py tanaka --lattice-sizes 32 --num-beta 50 --out-dir /tmp/tanaka_L32
+    python scripts/generate_data.py tanaka --lattice-sizes 32 --n-beta 50 --out-dir /tmp/tanaka_L32
     python scripts/generate_data.py kashiwa --configs-per-beta 500 --seed 1 --out-dir /tmp/kashiwa_small
 
 ノートブックから使う例 (ファイルに保存せず配位を受け取る):
@@ -69,29 +69,29 @@ CARRASQUILLA_PRM_NAMES = {
 
 
 @njit(cache=True)
-def _heatbath_sweep(sc, beta, hz, triangular):
-    Lx, Ly = sc.shape
-    xlist = np.random.permutation(Lx)
-    ylist = np.random.permutation(Ly)
-    for x in xlist:
-        for y in ylist:
+def _heatbath_sweep(spins, beta, hz, triangular):
+    Lx, Ly = spins.shape
+    x_order = np.random.permutation(Lx)
+    y_order = np.random.permutation(Ly)
+    for x in x_order:
+        for y in y_order:
             xu = (x + 1) % Lx
             xd = (x - 1) % Lx
             yu = (y + 1) % Ly
             yd = (y - 1) % Ly
-            h = sc[xu, y] + sc[xd, y] + sc[x, yu] + sc[x, yd]
+            local_field = spins[xu, y] + spins[xd, y] + spins[x, yu] + spins[x, yd]
             if triangular:
                 # 左上 (x-1, y+1) と右下 (x+1, y-1) のサイトを加える
-                h += sc[xd, yu] + sc[xu, yd]
-            h = h - hz
-            p = np.exp(beta * h) / (np.exp(beta * h) + np.exp(-beta * h))
-            if np.random.random() < p:
-                sc[x, y] = 1
+                local_field += spins[xd, yu] + spins[xu, yd]
+            local_field = local_field - hz
+            prob_up = np.exp(beta * local_field) / (np.exp(beta * local_field) + np.exp(-beta * local_field))
+            if np.random.random() < prob_up:
+                spins[x, y] = 1
             else:
-                sc[x, y] = -1
+                spins[x, y] = -1
 
 
-def _load_prm(name):
+def _load_prm_list(name):
     """01_carrasquilla_melko/prm.py からパラメータリストを読み込む."""
     spec = importlib.util.spec_from_file_location("prm", os.path.join(CARRASQUILLA_DIR, "prm.py"))
     prm = importlib.util.module_from_spec(spec)
@@ -106,16 +106,16 @@ def generate_carrasquilla(lattices=("square", "triangular"), hz=CARRASQUILLA_HZ,
     """
     for lattice in lattices:
         _seed_all(seed)
-        prm_list = _load_prm(CARRASQUILLA_PRM_NAMES[lattice])
-        sc = np.ones(CARRASQUILLA_LATTICE_SIZE, dtype=np.int64)  # cold start
-        for beta, n_sweep, n_discard, fname, save_every in tqdm(prm_list, desc=lattice):
-            os.makedirs(os.path.dirname(os.path.join(out_dir, fname)), exist_ok=True)
-            conf_cnt = 0
-            for isweep in range(n_sweep):
-                _heatbath_sweep(sc, beta, hz, lattice == "triangular")
-                if isweep % save_every == 0 and isweep >= n_discard:
-                    np.save(os.path.join(out_dir, f"{fname}{conf_cnt}"), sc.copy())
-                    conf_cnt += 1
+        prm_list = _load_prm_list(CARRASQUILLA_PRM_NAMES[lattice])
+        spins = np.ones(CARRASQUILLA_LATTICE_SIZE, dtype=np.int64)  # cold start
+        for beta, n_sweep, n_discard, path_prefix, save_every in tqdm(prm_list, desc=lattice):
+            os.makedirs(os.path.dirname(os.path.join(out_dir, path_prefix)), exist_ok=True)
+            n_saved = 0
+            for sweep in range(n_sweep):
+                _heatbath_sweep(spins, beta, hz, lattice == "triangular")
+                if sweep % save_every == 0 and sweep >= n_discard:
+                    np.save(os.path.join(out_dir, f"{path_prefix}{n_saved}"), spins.copy())
+                    n_saved += 1
 
 
 # ---------------------------------------------------------------------------
@@ -128,42 +128,42 @@ class MetropolisSettings:
 
     beta_min: float
     beta_max: float
-    num_beta: int  # 逆温度ラベルの数 (beta_min〜beta_max を等間隔に分ける)
+    n_beta: int  # 逆温度ラベルの数 (beta_min〜beta_max を等間隔に分ける)
     configs_per_beta: int  # 1 つの逆温度で保存する配位の数
     n_therm: int = 1000  # 各逆温度で最初に捨てるスイープ数 (元コードの n_step_first)
     n_interval: int = 500  # 保存する配位どうしの間のスイープ数 (元コードの n_step_second)
 
     def __post_init__(self):
-        if self.num_beta < 2:
-            raise ValueError("num_beta は 2 以上にしてください")
+        if self.n_beta < 2:
+            raise ValueError("n_beta は 2 以上にしてください")
 
     def betas(self):
         """元コードと同じ式で逆温度ラベルを作る (np.linspace とは末尾の桁が異なることがある)."""
-        return [self.beta_min + (i / (self.num_beta - 1)) * (self.beta_max - self.beta_min) for i in range(self.num_beta)]
+        return [self.beta_min + (i / (self.n_beta - 1)) * (self.beta_max - self.beta_min) for i in range(self.n_beta)]
 
     def replace(self, **changes):
         return dataclasses.replace(self, **changes)
 
 
 # 02_tanaka_tomiya/Ising_samp.ipynb: β=0.2〜1.0 を 100 等分, 各 100 配位
-TANAKA = MetropolisSettings(beta_min=0.2, beta_max=1.0, num_beta=100, configs_per_beta=100)
+TANAKA = MetropolisSettings(beta_min=0.2, beta_max=1.0, n_beta=100, configs_per_beta=100)
 TANAKA_LATTICE_SIZES = (8, 16)
 
 # 03_kashiwa_kikuchi_tomiya/Ising_samp.ipynb: β=0.05〜1.0 を 20 等分, 各 2000 配位
-KASHIWA = MetropolisSettings(beta_min=0.05, beta_max=1.0, num_beta=20, configs_per_beta=2000)
+KASHIWA = MetropolisSettings(beta_min=0.05, beta_max=1.0, n_beta=20, configs_per_beta=2000)
 KASHIWA_LATTICE_SIZE = 16
 
 
 @njit(cache=True)
 def _metropolis_sweep(state, beta, J, h):
-    """IsingMC.step_MH: N*N 回ランダムにサイトを選んで反転を試みる (state をその場で更新)."""
-    N = state.shape[0]
-    for _ in range(N * N):
-        x = np.random.randint(N)
-        y = np.random.randint(N)
-        s = state[y, x]
-        nb = state[y, (x + 1) % N] + state[y, (x - 1) % N] + state[(y + 1) % N, x] + state[(y - 1) % N, x]
-        delta_energy = 2 * (J * s * nb + h * s)
+    """IsingMC.step_MH: L*L 回ランダムにサイトを選んで反転を試みる (state をその場で更新)."""
+    L = state.shape[0]
+    for _ in range(L * L):
+        x = np.random.randint(L)
+        y = np.random.randint(L)
+        spin = state[y, x]
+        neighbor_sum = state[y, (x + 1) % L] + state[y, (x - 1) % L] + state[(y + 1) % L, x] + state[(y - 1) % L, x]
+        delta_energy = 2 * (J * spin * neighbor_sum + h * spin)
         if delta_energy < 0:
             state[y, x] *= -1
         elif np.random.random() <= np.exp(-beta * delta_energy):
@@ -174,7 +174,7 @@ def run_mcmc(init_state, beta, n_step, J=1, h=0.0):
     """IsingMC.run_mcmc の state_dynamics[n_step] にあたる, 最後の配位のコピー (float64) を返す.
 
     元コードと同様に init_state をその場で書き換える (呼び出し側の配列も変化する).
-    元コードは全ステップの配位を記録した配列 (n_step+1, N, N) を作り, その 1 枚をビューとして返していた.
+    元コードは全ステップの配位を記録した配列 (n_step+1, L, L) を作り, その 1 枚をビューとして返していた.
     ビューを保持し続けると配列全体がメモリに残るため (kashiwa で約 40 GB), 最後の配位だけをコピーして返す.
     返す配列が次の呼び出しでその場で書き換えられる点は元コードと同じなので, 生成されるデータは変わらない.
     """
@@ -184,7 +184,7 @@ def run_mcmc(init_state, beta, n_step, J=1, h=0.0):
     return state.astype(np.float64)
 
 
-def sample_metropolis(N, settings, seed=DEFAULT_SEED, *, force_negative=False, random_flip=False, desc=None):
+def sample_metropolis(L, settings, seed=DEFAULT_SEED, *, force_negative=False, random_flip=False, desc=None):
     """各逆温度で配位を作り, (配位のリスト, 逆温度ラベルのリスト) を返す.
 
     force_negative: 配位の磁化が正なら符号を反転する (02 tanaka の処理)
@@ -197,7 +197,7 @@ def sample_metropolis(N, settings, seed=DEFAULT_SEED, *, force_negative=False, r
     _seed_all(seed)
     spin_data, label_data = [], []
     for beta in tqdm(settings.betas(), desc=desc):
-        state = run_mcmc(np.full((N, N), -1), beta, settings.n_therm)
+        state = run_mcmc(np.full((L, L), -1), beta, settings.n_therm)
         for _ in range(settings.configs_per_beta):
             if random_flip and np.random.choice([True, False]):
                 init_state = -1 * state
@@ -219,16 +219,16 @@ def _save_pickle(spin_data, label_data, path):
 
 
 def generate_tanaka(lattice_sizes=TANAKA_LATTICE_SIZES, settings=TANAKA, seed=DEFAULT_SEED, out_dir=TANAKA_DATA_DIR):
-    """格子サイズごとに out_dir/Ising_data_L{N}.pkl を作る."""
-    for N in lattice_sizes:
-        spin_data, label_data = sample_metropolis(N, settings, seed, force_negative=True, desc=f"tanaka L={N}")
-        _save_pickle(spin_data, label_data, os.path.join(out_dir, f"Ising_data_L{N}.pkl"))
+    """格子サイズごとに out_dir/Ising_data_L{L}.pkl を作る."""
+    for L in lattice_sizes:
+        spin_data, label_data = sample_metropolis(L, settings, seed, force_negative=True, desc=f"tanaka L={L}")
+        _save_pickle(spin_data, label_data, os.path.join(out_dir, f"Ising_data_L{L}.pkl"))
 
 
-def generate_kashiwa(N=KASHIWA_LATTICE_SIZE, settings=KASHIWA, seed=DEFAULT_SEED, out_dir=KASHIWA_DATA_DIR):
-    """out_dir/Ising_data_L{N}_v3.pkl を作る (temp_measure.ipynb などは _v3 の付いたファイル名で読み込む)."""
-    spin_data, label_data = sample_metropolis(N, settings, seed, random_flip=True, desc=f"kashiwa L={N}")
-    _save_pickle(spin_data, label_data, os.path.join(out_dir, f"Ising_data_L{N}_v3.pkl"))
+def generate_kashiwa(L=KASHIWA_LATTICE_SIZE, settings=KASHIWA, seed=DEFAULT_SEED, out_dir=KASHIWA_DATA_DIR):
+    """out_dir/Ising_data_L{L}_v3.pkl を作る (temp_measure.ipynb などは _v3 の付いたファイル名で読み込む)."""
+    spin_data, label_data = sample_metropolis(L, settings, seed, random_flip=True, desc=f"kashiwa L={L}")
+    _save_pickle(spin_data, label_data, os.path.join(out_dir, f"Ising_data_L{L}_v3.pkl"))
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +238,7 @@ def _add_metropolis_args(parser, defaults):
     g = parser.add_argument_group("メトロポリス法のパラメータ")
     g.add_argument("--beta-min", type=float, default=defaults.beta_min, help="最小の逆温度 (default: %(default)s)")
     g.add_argument("--beta-max", type=float, default=defaults.beta_max, help="最大の逆温度 (default: %(default)s)")
-    g.add_argument("--num-beta", type=int, default=defaults.num_beta, help="逆温度ラベルの数 (default: %(default)s)")
+    g.add_argument("--n-beta", type=int, default=defaults.n_beta, help="逆温度ラベルの数 (default: %(default)s)")
     g.add_argument("--configs-per-beta", type=int, default=defaults.configs_per_beta, help="1 つの逆温度で作る配位の数 (default: %(default)s)")
     g.add_argument("--n-therm", type=int, default=defaults.n_therm, help="最初に捨てるスイープ数 (default: %(default)s)")
     g.add_argument("--n-interval", type=int, default=defaults.n_interval, help="保存する配位の間のスイープ数 (default: %(default)s)")
@@ -248,7 +248,7 @@ def _metropolis_settings(args):
     return MetropolisSettings(
         beta_min=args.beta_min,
         beta_max=args.beta_max,
-        num_beta=args.num_beta,
+        n_beta=args.n_beta,
         configs_per_beta=args.configs_per_beta,
         n_therm=args.n_therm,
         n_interval=args.n_interval,
@@ -271,12 +271,12 @@ def build_parser():
 
     p = sub.add_parser("tanaka", parents=[common], help="02: メトロポリス法で温度測定器の学習データを生成する")
     p.add_argument("--lattice-sizes", type=int, nargs="+", default=list(TANAKA_LATTICE_SIZES), help="格子サイズ (default: 8 16)")
-    p.add_argument("--out-dir", default=TANAKA_DATA_DIR, help="Ising_data_L{N}.pkl の保存先 (default: 実験の data フォルダ)")
+    p.add_argument("--out-dir", default=TANAKA_DATA_DIR, help="Ising_data_L{L}.pkl の保存先 (default: 実験の data フォルダ)")
     _add_metropolis_args(p, TANAKA)
 
     p = sub.add_parser("kashiwa", parents=[common], help="03: メトロポリス法で温度測定器の学習データを生成する")
     p.add_argument("--lattice-size", type=int, default=KASHIWA_LATTICE_SIZE, help="格子サイズ (default: %(default)s)")
-    p.add_argument("--out-dir", default=KASHIWA_DATA_DIR, help="Ising_data_L{N}_v3.pkl の保存先 (default: 実験の data フォルダ)")
+    p.add_argument("--out-dir", default=KASHIWA_DATA_DIR, help="Ising_data_L{L}_v3.pkl の保存先 (default: 実験の data フォルダ)")
     _add_metropolis_args(p, KASHIWA)
 
     return parser
