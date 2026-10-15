@@ -59,7 +59,7 @@ docker compose up --build
 python scripts/generate_data.py all
 ```
 
-実験ごとに生成することもできます（`carrasquilla` / `tanaka` / `kashiwa`）。
+実験ごとに生成することもできます（`carrasquilla` / `tanaka` / `kashiwa`）。格子サイズや逆温度の範囲、配位の数などのパラメータも変えられます。設定できる項目は `python scripts/generate_data.py tanaka -h` のように確認してください。
 
 ### 3. ノートブックの実行
 
