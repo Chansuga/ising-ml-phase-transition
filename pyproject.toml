@@ -1,0 +1,37 @@
+[project]
+name = "ising-ml-phase-transition"
+version = "1.0.0"
+description = "機械学習と2次元イジング模型における相転移検出（修士論文の再現実験）"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+    "numpy==2.0.2",
+    "scipy==1.14.1",
+    "scikit-learn==1.5.2",
+    "matplotlib==3.9.2",
+    "numba==0.60.0",
+    "tqdm==4.66.5",
+    "ipykernel>=6.29",
+    "ipywidgets==8.1.5",
+]
+
+[dependency-groups]
+# JupyterLab を使わず VS Code などでノートブックを開く場合は `uv sync --no-group lab`
+lab = ["jupyterlab==4.2.5"]
+
+[tool.uv]
+package = false
+default-groups = ["lab"]
+
+# PyTorch は CPU 版のみを使う（CUDA ライブラリを入れない）
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ipynb_checkpoints/
+
+# 生成データ (scripts/generate_data.py で再生成する)
+experiments/**/data/*.pkl
+experiments/**/data/conf/
+experiments/**/data/conf_tri/
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

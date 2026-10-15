@@ -1,0 +1,8 @@
+services:
+  lab:
+    build: .
+    image: ising-ml-phase-transition:latest
+    ports:
+      - "127.0.0.1:8888:8888"
+    volumes:
+      - .:/work
