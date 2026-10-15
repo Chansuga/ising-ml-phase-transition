@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .venv/
 .ipynb_checkpoints/
+.mypy_cache/
 
 # 生成データ (scripts/generate_data.py で再生成する)
 experiments/**/data/*.pkl
